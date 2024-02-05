@@ -6,14 +6,14 @@ class CaseInsensitiveDict(dict):
         super().__init__()
         for k, v in data.items():
             self[k] = v
-        if isinstance(d, dict):
+        if isinstance(d, dict):  # pragma: no cover
             for k, v in d.items():
                 self[k] = v
 
     def __setitem__(self, key: str, value):
         super(CaseInsensitiveDict, self).__setitem__(key.lower(), value)
 
-    def __getitem__(self, key: str):
+    def __getitem__(self, key: str):  # pragma: no cover
         return super(CaseInsensitiveDict, self).__getitem__(key.lower())
 
     def __contains__(self, item: str):

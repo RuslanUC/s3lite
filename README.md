@@ -66,3 +66,11 @@ presigned_url = obj.share()  # Url will be valid for 1 day
 
 presigned_url_1h = client.share("new-bucket", "test.txt", 3600)  # Url will be valid for 1 hour
 ```
+
+### Delete object
+```python
+from s3lite import Client
+
+client = Client("key-id", "secret-key", "https://s3-endpoint")
+saved_path = await client.delete_object("new-bucket", "test-image.jpg")
+```
