@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from io import BytesIO, SEEK_END
 from pathlib import Path
@@ -199,6 +200,33 @@ class Client:
 
         async with SignedClient(self._signer) as client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/")
+            self._check_error(resp)
+
+    async def get_bucket_policy(self, bucket: str | Bucket) -> dict:
+        if isinstance(bucket, Bucket):
+            bucket = bucket.name
+
+        async with SignedClient(self._signer) as client:
+            resp = await client.get(f"{self._endpoint}/{bucket}/?policy=")
+            self._check_error(resp)
+            return resp.json()
+
+    async def put_bucket_policy(self, bucket: str | Bucket, policy: dict) -> None:
+        if isinstance(bucket, Bucket):
+            bucket = bucket.name
+
+        policy_bytes = json.dumps(policy).encode("utf8")
+
+        async with SignedClient(self._signer) as client:
+            resp = await client.put(f"{self._endpoint}/{bucket}/?policy=", content=policy_bytes)
+            self._check_error(resp)
+
+    async def delete_bucket_policy(self, bucket: str | Bucket) -> None:
+        if isinstance(bucket, Bucket):
+            bucket = bucket.name
+
+        async with SignedClient(self._signer) as client:
+            resp = await client.delete(f"{self._endpoint}/{bucket}/?policy=")
             self._check_error(resp)
 
     # Aliases for boto3 compatibility

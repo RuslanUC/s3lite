@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "s3lite"
-version = "0.1.1"
+version = "0.1.2"
 description = "Minimal async s3 implementation."
 authors = ["RuslanUC <dev_ruslan_uc@protonmail.com>"]
 readme = "README.md"

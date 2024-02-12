@@ -95,3 +95,40 @@ async def test_presigned_url():
 
     await obj.delete()
     await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
+async def test_bucket_policies():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    bucket = await client.create_bucket(f"test-{int(time())}")
+    content = urandom(1024 * 32)
+    policy = {
+        'Version': '2012-10-17',
+        'Statement': [{
+            'Effect': 'Allow',
+            'Principal': {'AWS': ['*']},
+            'Action': ['s3:GetObject'],
+            'Resource': [f'arn:aws:s3:::{bucket.name}/*']
+        }]
+    }
+
+    obj = await bucket.upload("/test.txt", BytesIO(content))
+
+    async with AsyncClient() as cl:
+        resp = await cl.get(f"{ENDPOINT}/{bucket.name}/test.txt")
+        assert resp.status_code == 403
+
+    await bucket.put_policy(policy)
+    assert await bucket.get_policy() == policy
+
+    async with AsyncClient() as cl:
+        resp = await cl.get(f"{ENDPOINT}/{bucket.name}/test.txt")
+        assert resp.status_code == 200
+        assert await resp.aread() == content
+
+    await bucket.delete_policy()
+    with pt.raises(S3Exception):
+        await bucket.get_policy()
+
+    await obj.delete()
+    await client.delete_bucket(bucket)

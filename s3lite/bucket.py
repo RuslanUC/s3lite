@@ -22,3 +22,12 @@ class Bucket:
 
     async def upload(self, key: str, file: str | BinaryIO) -> Object:
         return await self._client.upload_object(self, key, file)
+
+    async def get_policy(self) -> dict:
+        return await self._client.get_bucket_policy(self)
+
+    async def put_policy(self, policy: dict) -> None:
+        return await self._client.put_bucket_policy(self, policy)
+
+    async def delete_policy(self) -> None:
+        return await self._client.delete_bucket_policy(self)
