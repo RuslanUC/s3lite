@@ -14,16 +14,26 @@ from s3lite.auth import AWSSigV4, SignedClient
 from s3lite.bucket import Bucket
 from s3lite.exceptions import S3Exception
 from s3lite.object import Object
-from s3lite.utils import get_xml_attr, NS_URL
+from s3lite.utils import get_xml_attr, NS_URL, AsyncTaskPool
 
 IGNORED_ERRORS = {"BucketAlreadyOwnedByYou"}
 
 
 class ClientConfig:
-    __slots__ = ["multipart_threshold"]
+    """
+    Parameters:
+        multipart_threshold:
+            Minimum size of file to upload it with multipart upload
 
-    def __init__(self, multipart_threshold: int = 16 * 1024 * 1024):
+        max_concurrency:
+            Maximum number of async tasks for multipart uploads. Does not affect multipart uploads or downloads
+    """
+
+    __slots__ = ["multipart_threshold", "max_concurrency"]
+
+    def __init__(self, multipart_threshold: int = 16 * 1024 * 1024, max_concurrency: int = 6):
         self.multipart_threshold = multipart_threshold
+        self.max_concurrency = max_concurrency
 
 
 class Client:
@@ -41,7 +51,11 @@ class Client:
         if response.status_code < 400:
             return
 
-        error = ElementTree.parse(BytesIO(response.text.encode("utf8"))).getroot()
+        try:
+            error = ElementTree.parse(BytesIO(response.text.encode("utf8"))).getroot()
+        except:
+            raise S3Exception("S3liteError", "Failed to parse response xml.")
+
         error_code = get_xml_attr(error, "Code", ns="").text
         error_message = get_xml_attr(error, "Message", ns="").text
 
@@ -126,22 +140,24 @@ class Client:
             res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
             upload_id = get_xml_attr(res, "UploadId").text
 
+            async def _upload_task(part_number: int, content: bytes):
+                url = f"{self._endpoint}/{bucket}/{key}?partNumber={part_number}&uploadId={upload_id}"
+                resp_ = await client.put(url, content=content, headers={})
+                self._check_error(resp_)
+                etag = resp_.headers["ETag"]
+                return part_number, f"<Part><ETag>{etag}</ETag><PartNumber>{part_number}</PartNumber></Part>"
+
             # Upload parts
             part = 1
             total_size = 0
-            parts = ""
+            pool = AsyncTaskPool(self.config.max_concurrency)
             while data := file.read(self.config.multipart_threshold):
                 total_size += len(data)
-                headers = {}
-                url = f"{self._endpoint}/{bucket}/{key}?partNumber={part}&uploadId={upload_id}"
-
-                resp = await client.put(url, content=data, headers=headers)
-                self._check_error(resp)
-
-                etag = resp.headers["ETag"]
-                parts += f"<Part><ETag>{etag}</ETag><PartNumber>{part}</PartNumber></Part>"
-
+                pool.add(_upload_task(part, data))
                 part += 1
+
+            parts = sorted(await pool.results())
+            parts = "".join([part[1] for part in parts])
 
             # Complete upload
             body = (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
