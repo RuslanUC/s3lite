@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from io import BytesIO, SEEK_END
@@ -14,7 +15,7 @@ from s3lite.auth import AWSSigV4, SignedClient
 from s3lite.bucket import Bucket
 from s3lite.exceptions import S3Exception
 from s3lite.object import Object
-from s3lite.utils import get_xml_attr, NS_URL, AsyncTaskPool
+from s3lite.utils import get_xml_attr, NS_URL
 
 IGNORED_ERRORS = {"BucketAlreadyOwnedByYou"}
 
@@ -140,23 +141,29 @@ class Client:
             res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
             upload_id = get_xml_attr(res, "UploadId").text
 
+            sem = asyncio.Semaphore(self.config.max_concurrency)
+
             async def _upload_task(part_number: int, content: bytes):
+                await sem.acquire()
+
                 url = f"{self._endpoint}/{bucket}/{key}?partNumber={part_number}&uploadId={upload_id}"
                 resp_ = await client.put(url, content=content, headers={})
                 self._check_error(resp_)
                 etag = resp_.headers["ETag"]
+
+                sem.release()
                 return part_number, f"<Part><ETag>{etag}</ETag><PartNumber>{part_number}</PartNumber></Part>"
 
             # Upload parts
             part = 1
             total_size = 0
-            pool = AsyncTaskPool(self.config.max_concurrency)
+            tasks = []
             while data := file.read(self.config.multipart_threshold):
                 total_size += len(data)
-                pool.add(_upload_task(part, data))
+                tasks.append(asyncio.create_task(_upload_task(part, data)))
                 part += 1
 
-            parts = sorted(await pool.results())
+            parts = sorted(await asyncio.gather(*tasks))
             parts = "".join([part[1] for part in parts])
 
             # Complete upload
