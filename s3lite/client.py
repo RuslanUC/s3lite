@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from io import BytesIO, SEEK_END
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Union, Callable
 from xml.etree import ElementTree
 
 from dateutil import parser
@@ -18,6 +18,7 @@ from s3lite.object import Object
 from s3lite.utils import get_xml_attr, NS_URL
 
 IGNORED_ERRORS = {"BucketAlreadyOwnedByYou"}
+SignedClientClassOrFactory = Union[type[SignedClient], Callable[[AWSSigV4, ...], SignedClient]]
 
 
 class ClientConfig:
@@ -30,7 +31,7 @@ class ClientConfig:
             Maximum number of async tasks for multipart uploads. Does not affect multipart uploads or downloads
     """
 
-    __slots__ = ["multipart_threshold", "max_concurrency"]
+    __slots__ = ("multipart_threshold", "max_concurrency")
 
     def __init__(self, multipart_threshold: int = 16 * 1024 * 1024, max_concurrency: int = 6):
         self.multipart_threshold = multipart_threshold
@@ -38,8 +39,12 @@ class ClientConfig:
 
 
 class Client:
-    def __init__(self, access_key_id: str, secret_access_key: str, endpoint: str, region: str="us-east-1",
-                 config: ClientConfig = None):
+    __slots__ = ("_access_key_id", "_secret_access_key", "_endpoint", "_signer", "config", "_client_cls")
+
+    def __init__(
+            self, access_key_id: str, secret_access_key: str, endpoint: str, region: str="us-east-1",
+            config: ClientConfig = None, httpx_client: SignedClientClassOrFactory = SignedClient,
+    ):
         self._access_key_id = access_key_id
         self._secret_access_key = secret_access_key
         self._endpoint = endpoint
@@ -47,15 +52,17 @@ class Client:
         self._signer = AWSSigV4(access_key_id, secret_access_key, region)
 
         self.config = config or ClientConfig()
+        self._client_cls = httpx_client
 
-    def _check_error(self, response: Response) -> None:
+    @staticmethod
+    def _check_error(response: Response) -> None:
         if response.status_code < 400:
             return
 
         try:
             error = ElementTree.parse(BytesIO(response.text.encode("utf8"))).getroot()
-        except:
-            raise S3Exception("S3liteError", "Failed to parse response xml.")
+        except Exception as e:
+            raise S3Exception("S3liteError", "Failed to parse response xml.") from e
 
         error_code = get_xml_attr(error, "Code", ns="").text
         error_message = get_xml_attr(error, "Message", ns="").text
@@ -65,7 +72,7 @@ class Client:
 
     async def ls_buckets(self) -> list[Bucket]:
         buckets = []
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.get(f"{self._endpoint}/")
             self._check_error(resp)
             res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
@@ -81,7 +88,7 @@ class Client:
         body = (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 f"<CreateBucketConfiguration xmlns=\"{NS_URL}\"></CreateBucketConfiguration>").encode("utf8")
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.put(f"{self._endpoint}/{bucket_name}", content=body)
             self._check_error(resp)
 
@@ -89,7 +96,7 @@ class Client:
 
     async def ls_bucket(self, bucket_name: str) -> list[Object]:
         objs = []
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.get(f"{self._endpoint}/{bucket_name}")
             self._check_error(resp)
             res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
@@ -115,7 +122,7 @@ class Client:
             limit = max(limit, 0)
             headers["Range"] = f"bytes={offset}-{offset + limit - 1}" if limit else f"bytes={offset}-"
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.get(f"{self._endpoint}/{bucket}/{key}", headers=headers)
             self._check_error(resp)
             content = await resp.aread()
@@ -134,7 +141,7 @@ class Client:
         return str(save_path)
 
     async def _upload_object_multipart(self, bucket: str, key: str, file: BinaryIO) -> Object | None:
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             # Create multipart upload
             resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploads=")
             self._check_error(resp)
@@ -193,7 +200,7 @@ class Client:
             return await self._upload_object_multipart(bucket, key, file)
 
         file_body = file.read()
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.put(f"{self._endpoint}/{bucket}/{key}", content=file_body)
             self._check_error(resp)
 
@@ -213,7 +220,7 @@ class Client:
             bucket = bucket.name
 
         if key.startswith("/"): key = key[1:]
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/{key}")
             self._check_error(resp)
 
@@ -221,7 +228,7 @@ class Client:
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/")
             self._check_error(resp)
 
@@ -229,7 +236,7 @@ class Client:
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.get(f"{self._endpoint}/{bucket}/?policy=")
             self._check_error(resp)
             return resp.json()
@@ -240,7 +247,7 @@ class Client:
 
         policy_bytes = json.dumps(policy).encode("utf8")
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.put(f"{self._endpoint}/{bucket}/?policy=", content=policy_bytes)
             self._check_error(resp)
 
@@ -248,7 +255,7 @@ class Client:
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        async with SignedClient(self._signer) as client:
+        async with self._client_cls(self._signer) as client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/?policy=")
             self._check_error(resp)
 
