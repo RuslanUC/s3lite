@@ -146,8 +146,8 @@ class AWSSigV4:
 
 
 class SignedClient(AsyncClient):
-    def __init__(self, signer: AWSSigV4):
-        super().__init__()
+    def __init__(self, signer: AWSSigV4, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._signer = signer
 
     async def get(self, url: URLTypes, *, headers: HeaderTypes | None = None, **kwargs) -> Response:
