@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from io import BytesIO, SEEK_END
 from pathlib import Path
-from typing import BinaryIO, Union, Callable
+from typing import BinaryIO, Union, Callable, AsyncIterator
 from xml.etree import ElementTree
 
 from dateutil import parser
@@ -94,21 +94,41 @@ class Client:
 
         return Bucket(bucket_name, client=self)
 
-    async def ls_bucket(self, bucket_name: str) -> list[Object]:
-        objs = []
-        async with self._client_cls(self._signer) as client:
-            resp = await client.get(f"{self._endpoint}/{bucket_name}")
-            self._check_error(resp)
-            res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
+    async def ls_bucket(
+            self, bucket_name: str, prefix: str | None = None, max_keys: int | None = None
+    ) -> list[Object]:
+        return [obj async for obj in self.ls_bucket_iter(bucket_name, prefix, max_keys)]
 
-        for obj in get_xml_attr(res, "Contents", True):
-            name = get_xml_attr(obj, "Key").text
-            last_modified = parser.parse(get_xml_attr(obj, "LastModified").text)
-            size = int(get_xml_attr(obj, "Size").text)
+    async def ls_bucket_iter(
+            self, bucket_name: str, prefix: str | None = None, max_keys: int | None = None
+    ) -> AsyncIterator[Object]:
+        more_objects = True
+        marker = None
+        got_objects = 0
 
-            objs.append(Object(Bucket(bucket_name, client=self), name, last_modified, size, client=self))
+        while more_objects and (max_keys is None or got_objects < max_keys):
+            params = {}
+            if prefix is not None:
+                params["prefix"] = prefix
+            if max_keys is not None:
+                params["max-keys"] = min(max_keys - got_objects, 1000)
+            if marker is not None:
+                params["marker"] = marker
 
-        return objs
+            async with self._client_cls(self._signer) as client:
+                resp = await client.get(f"{self._endpoint}/{bucket_name}", params=params)
+                self._check_error(resp)
+                res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
+
+            more_objects = get_xml_attr(res, "IsTruncated").text.lower() == "true"
+
+            for obj in get_xml_attr(res, "Contents", True):
+                name = marker = get_xml_attr(obj, "Key").text
+                last_modified = parser.parse(get_xml_attr(obj, "LastModified").text)
+                size = int(get_xml_attr(obj, "Size").text)
+
+                yield Object(Bucket(bucket_name, client=self), name, last_modified, size, client=self)
+                got_objects += 1
 
     async def download_object(self, bucket: str | Bucket, key: str, path: str | None = None,
                               in_memory: bool = False, offset: int = 0, limit: int = 0) -> str | BytesIO:

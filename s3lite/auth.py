@@ -5,8 +5,8 @@ import hmac
 from datetime import datetime
 from urllib.parse import urlparse, quote
 
-from httpx import AsyncClient, Response
-from httpx._types import URLTypes, HeaderTypes, RequestContent
+from httpx import AsyncClient, Response, QueryParams
+from httpx._types import URLTypes, HeaderTypes, RequestContent, QueryParamTypes
 
 from s3lite.utils import CaseInsensitiveDict
 
@@ -41,8 +41,8 @@ class AWSSigV4:
         k_signing = sign_msg(k_service, "aws4_request")
         return sign_msg(k_signing, string_to_sign).hex()
 
-    def sign(self, url: str, headers: dict = None, method: str = "GET", body: bytes = b"",
-             add_signature: bool = False) -> tuple[str, dict]:
+    def sign(self, url: str, headers: dict | None = None, method: str = "GET", body: bytes = b"",
+             add_signature: bool = False, params: dict | None = None) -> tuple[str, dict]:
         headers = CaseInsensitiveDict(**(headers or {}))
         new_headers = CaseInsensitiveDict()
 
@@ -59,6 +59,11 @@ class AWSSigV4:
             qs = dict(map(lambda i: i.split('='), url_parts.query.split('&')))
         else:
             qs = {}
+        if params is not None:
+            for k, v in params.items():
+                if not isinstance(v, str):
+                    v = str(v)
+                qs[k] = quote(v, safe="")
 
         # Setup Headers
         if "Host" not in headers:
@@ -66,7 +71,7 @@ class AWSSigV4:
         if "Content-Type" not in headers:
             new_headers["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8; application/json"
         if "User-Agent" not in headers:
-            new_headers["User-Agent"] = 's3lite'
+            new_headers["User-Agent"] = "s3lite"
         new_headers["X-AMZ-Date"] = amzdate
 
         # Task 1: Create Canonical Request
@@ -150,47 +155,52 @@ class SignedClient(AsyncClient):
         super().__init__(*args, **kwargs)
         self._signer = signer
 
-    async def get(self, url: URLTypes, *, headers: HeaderTypes | None = None, **kwargs) -> Response:
+    async def get(
+            self, url: URLTypes, *, params: QueryParamTypes | None = None, headers: HeaderTypes | None = None, **kwargs
+    ) -> Response:
         if headers is None:
             headers = {}
-        _, headers_ = self._signer.sign(url, headers, add_signature=True)
+        _, headers_ = self._signer.sign(url, headers, add_signature=True, params=params)
         headers |= headers_
-        return await super().get(url=url, headers=headers, **kwargs)
+        return await super().get(url=url, headers=headers, params=params, **kwargs)
 
     async def put(
             self,
             url: URLTypes, *,
+            params: QueryParamTypes | None = None,
             content: RequestContent | None = None,
             headers: HeaderTypes | None = None,
             **kwargs
     ) -> Response:
         if headers is None:
             headers = {}
-        _, headers_ = self._signer.sign(url, headers, "PUT", content or b"", add_signature=True)
+        _, headers_ = self._signer.sign(url, headers, "PUT", content or b"", add_signature=True, params=params)
         headers |= headers_
-        return await super().put(url=url, content=content, headers=headers, **kwargs)
+        return await super().put(url=url, content=content, headers=headers, params=params, **kwargs)
 
     async def post(
             self,
             url: URLTypes, *,
+            params: QueryParamTypes | None = None,
             content: RequestContent | None = None,
             headers: HeaderTypes | None = None,
             **kwargs
     ) -> Response:
         if headers is None:
             headers = {}
-        _, headers_ = self._signer.sign(url, headers, "POST", content or b"", add_signature=True)
+        _, headers_ = self._signer.sign(url, headers, "POST", content or b"", add_signature=True, params=params)
         headers |= headers_
-        return await super().post(url=url, content=content, headers=headers, **kwargs)
+        return await super().post(url=url, content=content, headers=headers, params=params, **kwargs)
 
     async def delete(
             self,
             url: URLTypes, *,
+            params: QueryParamTypes | None = None,
             headers: HeaderTypes | None = None,
             **kwargs
     ) -> Response:
         if headers is None:
             headers = {}
-        _, headers_ = self._signer.sign(url, headers, "DELETE", add_signature=True)
+        _, headers_ = self._signer.sign(url, headers, "DELETE", add_signature=True, params=params)
         headers |= headers_
-        return await super().delete(url=url, headers=headers, **kwargs)
+        return await super().delete(url=url, headers=headers, params=params, **kwargs)

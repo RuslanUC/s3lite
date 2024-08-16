@@ -48,6 +48,43 @@ async def test_ls_bucket():
 
 
 @pt.mark.asyncio
+async def test_ls_bucket_prefix():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    bucket = await client.create_bucket(f"test-{int(time())}")
+    obj1 = await bucket.upload("/a/test.txt", BytesIO(b"test"))
+    obj2 = await bucket.upload("/a/test2.txt", BytesIO(b"test"))
+    obj3 = await bucket.upload("/b/test3.txt", BytesIO(b"test"))
+
+    assert len(await bucket.ls("a/")) == 2
+    assert len(await bucket.ls("b/")) == 1
+
+    await obj1.delete()
+    await obj2.delete()
+    await obj3.delete()
+    await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
+async def test_ls_bucket_max_keys():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    bucket = await client.create_bucket(f"test-{int(time())}")
+    obj1 = await bucket.upload("/a/test.txt", BytesIO(b"test"))
+    obj2 = await bucket.upload("/a/test2.txt", BytesIO(b"test"))
+    obj3 = await bucket.upload("/b/test3.txt", BytesIO(b"test"))
+
+    assert len(await bucket.ls(max_keys=1)) == 1
+    assert (await bucket.ls(max_keys=1))[0].name == "a/test.txt"
+
+    async for obj in client.ls_bucket_iter(bucket.name, "b/", 2):
+        assert obj.name == "b/test3.txt"
+
+    await obj1.delete()
+    await obj2.delete()
+    await obj3.delete()
+    await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
 async def test_delete_bucket_with_objects():
     client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
     bucket = await client.create_bucket(f"test-{int(time())}")
