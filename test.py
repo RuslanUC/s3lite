@@ -185,3 +185,22 @@ async def test_get_object():
 
     await obj1.delete()
     await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
+async def test_presigned_url_upload():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    bucket = await client.create_bucket(f"test-{int(time())}")
+
+    url = client.share(bucket, "/test-upload-presigned.bin", 60, True)
+    content = urandom(1024 * 32)
+
+    async with AsyncClient() as cl:
+        resp = await cl.put(url, content=content)
+        assert resp.status_code == 200
+
+    obj = await client.download_object(bucket, "/test-upload-presigned.bin", in_memory=True)
+    assert obj.getvalue() == content
+
+    await (await bucket.get_object("test-upload-presigned.bin")).delete()
+    await client.delete_bucket(bucket)

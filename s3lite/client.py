@@ -132,6 +132,7 @@ class Client:
 
     async def download_object(self, bucket: str | Bucket, key: str, path: str | None = None,
                               in_memory: bool = False, offset: int = 0, limit: int = 0) -> str | BytesIO:
+        key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
@@ -161,6 +162,7 @@ class Client:
         return str(save_path)
 
     async def get_object(self, bucket: str | Bucket, key: str) -> Object | None:
+        key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
@@ -174,6 +176,7 @@ class Client:
         return Object(Bucket(bucket, client=self), key, last_modified, size, client=self)
 
     async def _upload_object_multipart(self, bucket: str, key: str, file: BinaryIO) -> Object | None:
+        key = key.lstrip("/")
         async with self._client_cls(self._signer) as client:
             # Create multipart upload
             resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploads=")
@@ -215,6 +218,7 @@ class Client:
         return Object(Bucket(bucket, client=self), key, datetime.now(), total_size, client=self)
 
     async def upload_object(self, bucket: str | Bucket, key: str, file: str | BinaryIO) -> Object | None:
+        key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
@@ -242,17 +246,18 @@ class Client:
 
         return Object(Bucket(bucket, client=self), key, datetime.now(), file_size, client=self)
 
-    def share(self, bucket: str | Bucket, key: str, ttl: int = 86400) -> str:
+    def share(self, bucket: str | Bucket, key: str, ttl: int = 86400, upload: bool = False) -> str:
+        key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        return self._signer.presign(f"{self._endpoint}/{bucket}/{key}", False, ttl)
+        return self._signer.presign(f"{self._endpoint}/{bucket}/{key}", upload, ttl)
 
     async def delete_object(self, bucket: str | Bucket, key: str) -> None:
+        key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        if key.startswith("/"): key = key[1:]
         async with self._client_cls(self._signer) as client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/{key}")
             self._check_error(resp)
