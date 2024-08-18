@@ -160,6 +160,19 @@ class Client:
 
         return str(save_path)
 
+    async def get_object(self, bucket: str | Bucket, key: str) -> Object | None:
+        if isinstance(bucket, Bucket):
+            bucket = bucket.name
+
+        async with self._client_cls(self._signer) as client:
+            resp = await client.head(f"{self._endpoint}/{bucket}/{key}")
+            if resp.status_code != 200:
+                return
+
+        last_modified = parser.parse(resp.headers["Last-Modified"]) if "Last-Modified" else datetime(1970, 1, 1)
+        size = int(resp.headers["Content-Length"])
+        return Object(Bucket(bucket, client=self), key, last_modified, size, client=self)
+
     async def _upload_object_multipart(self, bucket: str, key: str, file: BinaryIO) -> Object | None:
         async with self._client_cls(self._signer) as client:
             # Create multipart upload

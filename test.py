@@ -169,3 +169,19 @@ async def test_bucket_policies():
 
     await obj.delete()
     await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
+async def test_get_object():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    bucket = await client.create_bucket(f"test-{int(time())}")
+    obj1 = await bucket.upload("/a/test.txt", BytesIO(b"test"))
+
+    obj = await client.get_object(bucket, "a/test.txt")
+    assert obj.name == obj1.name
+    assert obj.size == obj1.size
+
+    assert await client.get_object(bucket, "nonexistent") is None
+
+    await obj1.delete()
+    await client.delete_bucket(bucket)

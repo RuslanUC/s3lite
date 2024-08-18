@@ -31,3 +31,6 @@ class Bucket:
 
     async def delete_policy(self) -> None:
         return await self._client.delete_bucket_policy(self)
+
+    async def get_object(self, key: str) -> Object | None:
+        return await self._client.get_object(self, key)

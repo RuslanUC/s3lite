@@ -5,8 +5,10 @@ import hmac
 from datetime import datetime
 from urllib.parse import urlparse, quote
 
-from httpx import AsyncClient, Response, QueryParams
-from httpx._types import URLTypes, HeaderTypes, RequestContent, QueryParamTypes
+from httpx import AsyncClient, Response, QueryParams, USE_CLIENT_DEFAULT
+from httpx._client import UseClientDefault
+from httpx._types import URLTypes, HeaderTypes, RequestContent, QueryParamTypes, CookieTypes, AuthTypes, TimeoutTypes, \
+    RequestExtensions
 
 from s3lite.utils import CaseInsensitiveDict
 
@@ -154,6 +156,15 @@ class SignedClient(AsyncClient):
     def __init__(self, signer: AWSSigV4, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._signer = signer
+
+    async def head(
+            self, url: URLTypes, *, params: QueryParamTypes | None = None, headers: HeaderTypes | None = None, **kwargs
+    ) -> Response:
+        if headers is None:
+            headers = {}
+        _, headers_ = self._signer.sign(url, headers, "HEAD", add_signature=True, params=params)
+        headers |= headers_
+        return await super().head(url=url, headers=headers, params=params, **kwargs)
 
     async def get(
             self, url: URLTypes, *, params: QueryParamTypes | None = None, headers: HeaderTypes | None = None, **kwargs
