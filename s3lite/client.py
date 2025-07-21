@@ -175,46 +175,63 @@ class Client:
         size = int(resp.headers["Content-Length"])
         return Object(Bucket(bucket, client=self), key, last_modified, size, client=self)
 
-    async def _upload_object_multipart(self, bucket: str, key: str, file: BinaryIO) -> Object | None:
+    async def create_multipart_upload(self, bucket: str, key: str) -> str:
         key = key.lstrip("/")
         async with self._client_cls(self._signer) as client:
-            # Create multipart upload
             resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploads=")
             self._check_error(resp)
             res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
-            upload_id = get_xml_attr(res, "UploadId").text
+            return get_xml_attr(res, "UploadId").text
 
-            sem = asyncio.Semaphore(self.config.max_concurrency)
-
-            async def _upload_task(part_number: int, content: bytes):
-                await sem.acquire()
-
-                url = f"{self._endpoint}/{bucket}/{key}?partNumber={part_number}&uploadId={upload_id}"
-                resp_ = await client.put(url, content=content, headers={})
-                self._check_error(resp_)
-                etag = resp_.headers["ETag"]
-
-                sem.release()
-                return part_number, f"<Part><ETag>{etag}</ETag><PartNumber>{part_number}</PartNumber></Part>"
-
-            # Upload parts
-            part = 1
-            total_size = 0
-            tasks = []
-            while data := file.read(self.config.multipart_threshold):
-                total_size += len(data)
-                tasks.append(asyncio.create_task(_upload_task(part, data)))
-                part += 1
-
-            parts = sorted(await asyncio.gather(*tasks))
-            parts = "".join([part[1] for part in parts])
-
-            # Complete upload
-            body = (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    f"<CompleteMultipartUpload xmlns=\"{NS_URL}\">{parts}</CompleteMultipartUpload>").encode("utf8")
-            resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploadId={upload_id}", content=body)
+    async def upload_object_part(self, bucket: str, key: str, upload_id: str, part: int, content: bytes) -> str:
+        key = key.lstrip("/")
+        async with self._client_cls(self._signer) as client:
+            resp = await client.put(
+                f"{self._endpoint}/{bucket}/{key}?partNumber={part}&uploadId={upload_id}", content=content, headers={}
+            )
             self._check_error(resp)
+            return resp.headers["ETag"]
 
+    async def finish_multipart_upload(
+            self, bucket: str, key: str, upload_id: str, parts: list[tuple[int, str]],
+    ) -> None:
+        key = key.lstrip("/")
+
+        parts = sorted(parts)
+        parts = "".join([
+            f"<Part><ETag>{etag}</ETag><PartNumber>{part}</PartNumber></Part>"
+            for part, etag in parts
+        ])
+
+        body = (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                f"<CompleteMultipartUpload xmlns=\"{NS_URL}\">{parts}</CompleteMultipartUpload>").encode("utf8")
+        async with self._client_cls(self._signer) as client:
+            resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploadId={upload_id}", content=body)
+
+        self._check_error(resp)
+
+    async def _upload_object_multipart(self, bucket: str, key: str, file: BinaryIO) -> Object | None:
+        upload_id = await self.create_multipart_upload(bucket, key)
+
+        sem = asyncio.Semaphore(self.config.max_concurrency)
+
+        async def _upload_task(part_number: int, content: bytes) -> tuple[int, str]:
+            async with sem:
+                etag = await self.upload_object_part(bucket, key, upload_id, part_number, content)
+            return part_number, etag
+
+        # Upload parts
+        part = 1
+        total_size = 0
+        tasks = []
+        while data := file.read(self.config.multipart_threshold):
+            total_size += len(data)
+            tasks.append(asyncio.create_task(_upload_task(part, data)))
+            part += 1
+
+        parts = await asyncio.gather(*tasks)
+
+        await self.finish_multipart_upload(bucket, key, upload_id, parts)
         return Object(Bucket(bucket, client=self), key, datetime.now(), total_size, client=self)
 
     async def upload_object(self, bucket: str | Bucket, key: str, file: str | BinaryIO) -> Object | None:
