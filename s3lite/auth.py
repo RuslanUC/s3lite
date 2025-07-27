@@ -43,6 +43,21 @@ class AWSSigV4:
         k_signing = sign_msg(k_service, "aws4_request")
         return sign_msg(k_signing, string_to_sign).hex()
 
+    @staticmethod
+    def _process_params(url: str, params: dict[str, ...] | None) -> dict[str, str]:
+        url_parts = urlparse(url)
+        if len(url_parts.query) > 0:
+            qs = dict(map(lambda i: i.split('='), url_parts.query.split('&')))
+        else:
+            qs = {}
+        if params is not None:
+            for k, v in params.items():
+                if not isinstance(v, str):
+                    v = str(v)
+                qs[k] = quote(v, safe="")
+
+        return qs
+
     def sign(self, url: str, headers: dict | None = None, method: str = "GET", body: bytes = b"",
              add_signature: bool = False, params: dict | None = None) -> tuple[str, dict]:
         headers = CaseInsensitiveDict(**(headers or {}))
@@ -57,15 +72,7 @@ class AWSSigV4:
         url_parts = urlparse(url)
         host = url_parts.hostname
         uri = url_parts.path
-        if len(url_parts.query) > 0:
-            qs = dict(map(lambda i: i.split('='), url_parts.query.split('&')))
-        else:
-            qs = {}
-        if params is not None:
-            for k, v in params.items():
-                if not isinstance(v, str):
-                    v = str(v)
-                qs[k] = quote(v, safe="")
+        qs = self._process_params(url, params)
 
         # Setup Headers
         if "Host" not in headers:
@@ -122,7 +129,7 @@ class AWSSigV4:
 
         return signature, new_headers
 
-    def presign(self, url: str, upload: bool = False, ttl: int = 86400) -> str:
+    def presign(self, url: str, upload: bool = False, ttl: int = 86400, params: dict | None = None) -> str:
         method = "PUT" if upload else "GET"
 
         t = datetime.utcnow()
@@ -134,7 +141,8 @@ class AWSSigV4:
         url_parts = urlparse(url)
         host = url_parts.netloc
         uri = url_parts.path
-        qs = {
+        qs = self._process_params(url, params)
+        qs |= {
             "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
             "X-Amz-Credential": quote(f"{self.aws_access_key_id}/{credential_scope}", safe=""),
             "X-Amz-Date": amzdate,

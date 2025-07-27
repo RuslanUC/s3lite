@@ -169,7 +169,7 @@ class Client:
         async with self._client_cls(self._signer) as client:
             resp = await client.head(f"{self._endpoint}/{bucket}/{key}")
             if resp.status_code != 200:
-                return
+                return None
 
         last_modified = parser.parse(resp.headers["Last-Modified"]) if "Last-Modified" else datetime(1970, 1, 1)
         size = int(resp.headers["Content-Length"])
@@ -263,12 +263,24 @@ class Client:
 
         return Object(Bucket(bucket, client=self), key, datetime.now(), file_size, client=self)
 
-    def share(self, bucket: str | Bucket, key: str, ttl: int = 86400, upload: bool = False) -> str:
+    def share(
+            self, bucket: str | Bucket, key: str, ttl: int = 86400, upload: bool = False,
+            download_filename: str | None = None, content_disposition: str | None = None,
+    ) -> str:
         key = key.lstrip("/")
         if isinstance(bucket, Bucket):
             bucket = bucket.name
 
-        return self._signer.presign(f"{self._endpoint}/{bucket}/{key}", upload, ttl)
+        if upload:
+            content_disposition = None
+        elif download_filename:
+            content_disposition = f"attachment; filename=\"{download_filename}\""
+
+        params = {}
+        if content_disposition:
+            params["response-content-disposition"] = content_disposition
+
+        return self._signer.presign(f"{self._endpoint}/{bucket}/{key}", upload, ttl, params)
 
     async def delete_object(self, bucket: str | Bucket, key: str) -> None:
         key = key.lstrip("/")

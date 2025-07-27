@@ -36,5 +36,7 @@ class Object:
     async def delete(self) -> None:
         await self._client.delete_object(self.bucket, self.name)
 
-    def share(self, ttl: int = 86400) -> str:
-        return self._client.share(self.bucket, self.name, ttl)
+    def share(
+            self, ttl: int = 86400, download_filename: str | None = None, content_disposition: str | None = None,
+    ) -> str:
+        return self._client.share(self.bucket, self.name, ttl, False, download_filename, content_disposition)
