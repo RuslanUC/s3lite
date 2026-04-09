@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse, quote
 
-from httpx import AsyncClient, Response, QueryParams, USE_CLIENT_DEFAULT
-from httpx._client import UseClientDefault
-from httpx._types import URLTypes, HeaderTypes, RequestContent, QueryParamTypes, CookieTypes, AuthTypes, TimeoutTypes, \
-    RequestExtensions
+from httpx import AsyncClient, Response
+from httpx._types import URLTypes, HeaderTypes, RequestContent, QueryParamTypes
 
 from s3lite.utils import CaseInsensitiveDict
 
@@ -64,7 +62,7 @@ class AWSSigV4:
         new_headers = CaseInsensitiveDict()
 
         # Create a date for headers and the credential string
-        t = datetime.utcnow()
+        t = datetime.now(timezone.utc)
         amzdate = t.strftime('%Y%m%dT%H%M%SZ')
         datestamp = t.strftime('%Y%m%d')
 
@@ -132,7 +130,7 @@ class AWSSigV4:
     def presign(self, url: str, upload: bool = False, ttl: int = 86400, params: dict | None = None) -> str:
         method = "PUT" if upload else "GET"
 
-        t = datetime.utcnow()
+        t = datetime.now(timezone.utc)
         amzdate = t.strftime('%Y%m%dT%H%M%SZ')
         datestamp = t.strftime('%Y%m%d')
 

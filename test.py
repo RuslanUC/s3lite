@@ -222,3 +222,26 @@ async def test_presigned_url_custom_filename():
 
     await obj.delete()
     await client.delete_bucket(bucket)
+
+
+@pt.mark.asyncio
+async def test_copy_object():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    src_bucket = await client.create_bucket(f"test-{int(time())}-1")
+    dst_bucket = await client.create_bucket(f"test-{int(time())}-2")
+    content = urandom(1024 * 32)
+
+    src_obj = await src_bucket.upload("/test.bin", BytesIO(content))
+    assert await client.get_object(dst_bucket, "/test123.bin") is None
+
+    await client.copy_object(src_bucket, "/test.bin", dst_bucket, "/test123.bin")
+    dst_obj = await client.get_object(dst_bucket, "/test123.bin")
+    assert dst_bucket is not None
+
+    downloaded = await dst_obj.download(in_memory=True)
+    assert downloaded.read() == content
+
+    await src_obj.delete()
+    await dst_obj.delete()
+    await client.delete_bucket(src_bucket)
+    await client.delete_bucket(dst_bucket)

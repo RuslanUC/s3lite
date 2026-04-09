@@ -326,6 +326,22 @@ class Client:
             resp = await client.delete(f"{self._endpoint}/{bucket}/?policy=")
             self._check_error(resp)
 
+    async def copy_object(
+            self, source_bucket: str | Bucket, source_key: str, target_bucket: str | Bucket, target_key: str,
+    ) -> None:
+        source_key = source_key.lstrip("/")
+        target_key = target_key.lstrip("/")
+        if isinstance(source_bucket, Bucket):
+            source_bucket = source_bucket.name
+        if isinstance(target_bucket, Bucket):
+            target_bucket = target_bucket.name
+
+        async with self._client_cls(self._signer) as client:
+            resp = await client.put(f"{self._endpoint}/{target_bucket}/{target_key}", headers={
+                "x-amz-copy-source": f"{source_bucket}/{source_key}",
+            })
+            self._check_error(resp)
+
     # Aliases for boto3 compatibility
 
     list_buckets = ls_buckets
