@@ -193,18 +193,24 @@ class Client:
             return resp.headers["ETag"]
 
     async def upload_object_part_copy(
-            self, bucket: str, key: str, upload_id: str, part: int, source_bucket: str | Bucket, source_key: str
+            self, bucket: str, key: str, upload_id: str, part: int, source_bucket: str | Bucket, source_key: str,
+            source_offset: int | None = None, source_length: int | None = None,
     ) -> str:
         source_key = source_key.lstrip("/")
         if isinstance(source_bucket, Bucket):
             source_bucket = source_bucket.name
 
+        headers = {
+            "x-amz-copy-source": f"{source_bucket}/{source_key}",
+        }
+
+        if source_offset is not None and source_length is not None:
+            headers["x-amz-copy-source-range"] = f"bytes={source_offset}-{source_offset + source_length - 1}"
+
         async with self._client_cls(self._signer) as client:
             resp = await client.put(
                 f"{self._endpoint}/{bucket}/{key}?partNumber={part}&uploadId={upload_id}",
-                headers={
-                    "x-amz-copy-source": f"{source_bucket}/{source_key}",
-                },
+                headers=headers,
             )
             self._check_error(resp)
             res = ElementTree.parse(BytesIO(resp.content)).getroot()
