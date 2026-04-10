@@ -180,7 +180,7 @@ class Client:
         async with self._client_cls(self._signer) as client:
             resp = await client.post(f"{self._endpoint}/{bucket}/{key}?uploads=")
             self._check_error(resp)
-            res = ElementTree.parse(BytesIO(resp.text.encode("utf8"))).getroot()
+            res = ElementTree.parse(BytesIO(resp.content)).getroot()
             return get_xml_attr(res, "UploadId").text
 
     async def upload_object_part(self, bucket: str, key: str, upload_id: str, part: int, content: bytes) -> str:
@@ -191,6 +191,24 @@ class Client:
             )
             self._check_error(resp)
             return resp.headers["ETag"]
+
+    async def upload_object_part_copy(
+            self, bucket: str, key: str, upload_id: str, part: int, source_bucket: str | Bucket, source_key: str
+    ) -> str:
+        source_key = source_key.lstrip("/")
+        if isinstance(source_bucket, Bucket):
+            source_bucket = source_bucket.name
+
+        async with self._client_cls(self._signer) as client:
+            resp = await client.put(
+                f"{self._endpoint}/{bucket}/{key}?partNumber={part}&uploadId={upload_id}",
+                headers={
+                    "x-amz-copy-source": f"{source_bucket}/{source_key}",
+                },
+            )
+            self._check_error(resp)
+            res = ElementTree.parse(BytesIO(resp.content)).getroot()
+            return get_xml_attr(res, "ETag").text
 
     async def finish_multipart_upload(
             self, bucket: str, key: str, upload_id: str, parts: list[tuple[int, str]],

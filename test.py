@@ -245,3 +245,45 @@ async def test_copy_object():
     await dst_obj.delete()
     await client.delete_bucket(src_bucket)
     await client.delete_bucket(dst_bucket)
+
+
+@pt.mark.asyncio
+async def test_multipart_upload_copy_objects():
+    client = Client(KEY_ID, ACCESS_KEY, ENDPOINT)
+    src_bucket = await client.create_bucket(f"test-{int(time())}-1")
+    dst_bucket = await client.create_bucket(f"test-{int(time())}-2")
+    content1 = urandom(1024 * 1024 * 8)
+    content2 = urandom(1024 * 1024 * 8)
+    content3 = urandom(1024 * 1024 * 8)
+
+    src_obj1 = await src_bucket.upload("/test1.bin", BytesIO(content1))
+    src_obj2 = await src_bucket.upload("/test2.bin", BytesIO(content2))
+    src_obj3 = await src_bucket.upload("/test3.bin", BytesIO(content3))
+
+    upload_id = await client.create_multipart_upload(dst_bucket.name, "test.bin")
+    part1_etag = await client.upload_object_part_copy(
+        dst_bucket.name, "test.bin", upload_id, 1, src_bucket.name, "test1.bin"
+    )
+    part2_etag = await client.upload_object_part_copy(
+        dst_bucket.name, "test.bin", upload_id, 2, src_bucket.name, "test2.bin"
+    )
+    part3_etag = await client.upload_object_part_copy(
+        dst_bucket.name, "test.bin", upload_id, 3, src_bucket.name, "test3.bin"
+    )
+
+    await client.finish_multipart_upload(dst_bucket.name, "test.bin", upload_id, [
+        (1, part1_etag),
+        (2, part2_etag),
+        (3, part3_etag),
+    ])
+
+    dst_obj = await client.get_object(dst_bucket, "/test.bin")
+    assert dst_bucket is not None
+
+    downloaded = await dst_obj.download(in_memory=True)
+    assert downloaded.read() == (content1 + content2 + content3)
+
+    for obj in (src_obj1, src_obj2, src_obj3, dst_obj):
+        await obj.delete()
+    await client.delete_bucket(src_bucket)
+    await client.delete_bucket(dst_bucket)
